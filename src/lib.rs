@@ -18,7 +18,7 @@
 //! ```rust,no_run
 //! use rig_acp_discovery::{AgentKind, detect, detect_all};
 //!
-//! #[tokio::main]
+//! #[tokio::main(flavor = "current_thread")]
 //! async fn main() {
 //!     // Detect a single agent
 //!     let status = detect(AgentKind::ClaudeCode).await;
