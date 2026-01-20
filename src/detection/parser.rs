@@ -54,7 +54,8 @@ pub(crate) fn parse_version(output: &str) -> Option<(Version, String)> {
         // Check if this is followed by another .digit (would be part of 3-part version)
         // If so, skip this match as it was already handled above (or should have been)
         let remaining = &output[match_end..];
-        if remaining.starts_with('.') && remaining.chars().nth(1).is_some_and(|c| c.is_ascii_digit())
+        if remaining.starts_with('.')
+            && remaining.chars().nth(1).is_some_and(|c| c.is_ascii_digit())
         {
             // This is part of a 3-part version, but we didn't match it above
             // This shouldn't happen normally, but handle it gracefully

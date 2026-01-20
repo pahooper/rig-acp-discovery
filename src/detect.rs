@@ -638,8 +638,14 @@ mod mock_tests {
         // If not installed, it should return NotInstalled
         match status {
             AgentStatus::Installed(meta) => {
-                assert!(meta.version.is_none(), "skip_version should result in version: None");
-                assert!(meta.raw_version.is_none(), "skip_version should result in raw_version: None");
+                assert!(
+                    meta.version.is_none(),
+                    "skip_version should result in version: None"
+                );
+                assert!(
+                    meta.raw_version.is_none(),
+                    "skip_version should result in raw_version: None"
+                );
             }
             AgentStatus::NotInstalled => {
                 // Expected if agent not installed

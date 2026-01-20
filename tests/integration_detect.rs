@@ -31,7 +31,10 @@ async fn test_detect_all_returns_valid_statuses() {
                 // Print version info
                 let version_display = match &meta.version {
                     Some(v) => v.to_string(),
-                    None => meta.raw_version.clone().unwrap_or_else(|| "unknown".to_string()),
+                    None => meta
+                        .raw_version
+                        .clone()
+                        .unwrap_or_else(|| "unknown".to_string()),
                 };
                 println!(
                     "{}: {} at {:?} (method: {:?})",

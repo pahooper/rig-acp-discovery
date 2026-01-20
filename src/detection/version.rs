@@ -34,15 +34,15 @@ pub(crate) async fn check_version(
     cmd.arg("--version").kill_on_drop(true);
 
     let output = timeout(timeout_duration, cmd.output())
-    .await
-    .map_err(|_| DetectionError::Timeout)?
-    .map_err(|e| {
-        if e.kind() == std::io::ErrorKind::PermissionDenied {
-            DetectionError::PermissionDenied
-        } else {
-            DetectionError::IoError
-        }
-    })?;
+        .await
+        .map_err(|_| DetectionError::Timeout)?
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                DetectionError::PermissionDenied
+            } else {
+                DetectionError::IoError
+            }
+        })?;
 
     if !output.status.success() {
         return Err(DetectionError::IoError);

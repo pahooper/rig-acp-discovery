@@ -26,7 +26,10 @@ fn get_home_paths(name: &str) -> Vec<PathBuf> {
                 userprofile, name
             )));
             // Without extension (which crate will try PATHEXT)
-            paths.push(PathBuf::from(format!(r"{}\.local\bin\{}", userprofile, name)));
+            paths.push(PathBuf::from(format!(
+                r"{}\.local\bin\{}",
+                userprofile, name
+            )));
         }
 
         // Windows: use APPDATA for npm global installs
