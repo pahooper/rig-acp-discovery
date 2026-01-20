@@ -1,10 +1,10 @@
 //! # rig-acp-discovery
 //!
-//! Agent discovery for AI coding agents (Claude Code, Codex, OpenCode, Gemini).
+//! Agent discovery and installation for AI coding agents (Claude Code, Codex, OpenCode, Gemini).
 //!
 //! This crate provides types and functions for detecting installed AI coding agents
-//! and their capabilities. It can be used independently or integrated with rig-acp
-//! via the `discovery` feature flag.
+//! and their capabilities, as well as programmatic installation with progress reporting.
+//! It can be used independently or integrated with rig-acp via the `discovery` feature flag.
 //!
 //! ## Features
 //!
@@ -13,9 +13,10 @@
 //! - `DetectOptions` struct for configuring detection timeout
 //! - `detect()` async function for detecting a single agent
 //! - `detect_all()` async function for detecting all agents in parallel
-//! - `detect_with_options()` and `detect_all_with_options()` for custom configuration
+//! - `can_install()` async function for prerequisite checking
+//! - `install()` async function for programmatic installation with progress
 //!
-//! ## Example
+//! ## Detection Example
 //!
 //! ```rust,no_run
 //! use rig_acp_discovery::{AgentKind, DetectOptions, detect, detect_all};
@@ -43,6 +44,38 @@
 //!                 println!("{}: detection failed: {}", kind.display_name(), e.description());
 //!             }
 //!         }
+//!     }
+//! }
+//! ```
+//!
+//! ## Installation
+//!
+//! Agents can be installed programmatically:
+//!
+//! ```rust,no_run
+//! use rig_acp_discovery::{AgentKind, InstallOptions, InstallProgress, install, can_install};
+//!
+//! #[tokio::main(flavor = "current_thread")]
+//! async fn main() {
+//!     // Pre-flight check
+//!     if let Err(e) = can_install(AgentKind::Codex).await {
+//!         println!("Cannot install: {}. Fix: {}", e, e.fix_suggestion());
+//!         return;
+//!     }
+//!
+//!     // Install with progress
+//!     let result = install(
+//!         AgentKind::Codex,
+//!         InstallOptions::default(),
+//!         |progress| match progress {
+//!             InstallProgress::Started { agent } => println!("Installing {}...", agent.display_name()),
+//!             InstallProgress::Completed { agent } => println!("{} installed!", agent.display_name()),
+//!             _ => {}
+//!         },
+//!     ).await;
+//!
+//!     if let Err(e) = result {
+//!         println!("Installation failed: {}. Fix: {}", e, e.fix_suggestion());
 //!     }
 //! }
 //! ```

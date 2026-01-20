@@ -38,7 +38,7 @@ use tokio::time::timeout;
 /// ```rust,no_run
 /// use rig_acp_discovery::{AgentKind, InstallOptions, InstallProgress, install};
 ///
-/// #[tokio::main]
+/// #[tokio::main(flavor = "current_thread")]
 /// async fn main() {
 ///     let result = install(
 ///         AgentKind::ClaudeCode,
@@ -52,7 +52,11 @@ use tokio::time::timeout;
 ///     }
 /// }
 /// ```
-pub async fn install<F>(kind: AgentKind, options: InstallOptions, on_progress: F) -> Result<(), InstallError>
+pub async fn install<F>(
+    kind: AgentKind,
+    options: InstallOptions,
+    on_progress: F,
+) -> Result<(), InstallError>
 where
     F: Fn(InstallProgress) + Send + Sync,
 {
@@ -170,15 +174,22 @@ mod tests {
         let stages_clone = stages.clone();
 
         // Run install - it will fail at some point but should call callback
-        let _ = install(AgentKind::ClaudeCode, InstallOptions::default(), move |progress| {
-            stages_clone.lock().unwrap().push(format!("{:?}", progress));
-        })
+        let _ = install(
+            AgentKind::ClaudeCode,
+            InstallOptions::default(),
+            move |progress| {
+                stages_clone.lock().unwrap().push(format!("{:?}", progress));
+            },
+        )
         .await;
 
         let stages = stages.lock().unwrap();
         // At minimum, Started should have been called
         assert!(!stages.is_empty(), "Progress callback should be called");
-        assert!(stages[0].contains("Started"), "First stage should be Started");
+        assert!(
+            stages[0].contains("Started"),
+            "First stage should be Started"
+        );
     }
 
     #[tokio::test]
@@ -195,11 +206,15 @@ mod tests {
         let saw_prereq_check = Arc::new(Mutex::new(false));
         let saw_prereq_check_clone = saw_prereq_check.clone();
 
-        let _ = install(AgentKind::ClaudeCode, InstallOptions::default(), move |progress| {
-            if matches!(progress, InstallProgress::CheckingPrerequisites) {
-                *saw_prereq_check_clone.lock().unwrap() = true;
-            }
-        })
+        let _ = install(
+            AgentKind::ClaudeCode,
+            InstallOptions::default(),
+            move |progress| {
+                if matches!(progress, InstallProgress::CheckingPrerequisites) {
+                    *saw_prereq_check_clone.lock().unwrap() = true;
+                }
+            },
+        )
         .await;
 
         assert!(
@@ -214,17 +229,21 @@ mod tests {
         let stages = Arc::new(Mutex::new(Vec::new()));
         let stages_clone = stages.clone();
 
-        let _ = install(AgentKind::ClaudeCode, InstallOptions::default(), move |progress| {
-            let stage_name = match &progress {
-                InstallProgress::Started { .. } => "Started",
-                InstallProgress::CheckingPrerequisites => "CheckingPrerequisites",
-                InstallProgress::Downloading { .. } => "Downloading",
-                InstallProgress::Installing { .. } => "Installing",
-                InstallProgress::Verifying { .. } => "Verifying",
-                InstallProgress::Completed { .. } => "Completed",
-            };
-            stages_clone.lock().unwrap().push(stage_name.to_string());
-        })
+        let _ = install(
+            AgentKind::ClaudeCode,
+            InstallOptions::default(),
+            move |progress| {
+                let stage_name = match &progress {
+                    InstallProgress::Started { .. } => "Started",
+                    InstallProgress::CheckingPrerequisites => "CheckingPrerequisites",
+                    InstallProgress::Downloading { .. } => "Downloading",
+                    InstallProgress::Installing { .. } => "Installing",
+                    InstallProgress::Verifying { .. } => "Verifying",
+                    InstallProgress::Completed { .. } => "Completed",
+                };
+                stages_clone.lock().unwrap().push(stage_name.to_string());
+            },
+        )
         .await;
 
         let stages = stages.lock().unwrap();
