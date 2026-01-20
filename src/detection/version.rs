@@ -28,16 +28,19 @@ const VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 /// - `IoError` for other I/O failures or non-zero exit codes
 /// - `VersionParseFailed` if output is not valid UTF-8
 pub(crate) async fn check_version(path: &Path) -> Result<String, DetectionError> {
-    let output = timeout(VERSION_TIMEOUT, Command::new(path).arg("--version").output())
-        .await
-        .map_err(|_| DetectionError::Timeout)?
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::PermissionDenied {
-                DetectionError::PermissionDenied
-            } else {
-                DetectionError::IoError
-            }
-        })?;
+    let output = timeout(
+        VERSION_TIMEOUT,
+        Command::new(path).arg("--version").output(),
+    )
+    .await
+    .map_err(|_| DetectionError::Timeout)?
+    .map_err(|e| {
+        if e.kind() == std::io::ErrorKind::PermissionDenied {
+            DetectionError::PermissionDenied
+        } else {
+            DetectionError::IoError
+        }
+    })?;
 
     if !output.status.success() {
         return Err(DetectionError::IoError);
