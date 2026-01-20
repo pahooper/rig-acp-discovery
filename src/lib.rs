@@ -51,9 +51,13 @@ mod agent_kind;
 mod agent_status;
 mod detect;
 mod detection;
+mod install;
 mod options;
 
 pub use agent_kind::AgentKind;
 pub use agent_status::{AgentStatus, DetectionError, InstalledMetadata};
 pub use detect::{detect, detect_all, detect_all_with_options, detect_with_options};
+pub use install::{
+    InstallInfo, InstallLocation, InstallMethod, Prerequisite, StructuredCommand, VerificationStep,
+};
 pub use options::DetectOptions;
