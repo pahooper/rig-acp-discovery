@@ -92,21 +92,56 @@ pub async fn detect(kind: AgentKind) -> AgentStatus {
 /// Detect the installation method from the executable path.
 ///
 /// This heuristic checks the path for common patterns that indicate
-/// how the tool was installed.
+/// how the tool was installed. On Windows, path matching is case-insensitive
+/// to account for filesystem behavior.
 fn detect_install_method(path: &Path) -> Option<String> {
     let path_str = path.to_string_lossy();
 
+    // Normalize case for Windows (case-insensitive filesystem)
+    #[cfg(windows)]
+    let path_str = path_str.to_lowercase();
+    #[cfg(not(windows))]
+    let path_str = path_str.to_string();
+
+    // npm patterns (cross-platform)
     if path_str.contains(".npm") || path_str.contains("node_modules") {
-        Some("npm".to_string())
-    } else if path_str.contains(".cargo") {
-        Some("cargo".to_string())
-    } else if path_str.contains("homebrew") || path_str.contains("linuxbrew") {
-        Some("brew".to_string())
-    } else if path_str.contains("mise") {
-        Some("mise".to_string())
-    } else {
-        None
+        return Some("npm".to_string());
     }
+
+    // Windows-specific npm location: %APPDATA%\npm
+    #[cfg(windows)]
+    if path_str.contains("appdata") && path_str.contains("npm") {
+        return Some("npm".to_string());
+    }
+
+    // Cargo (cross-platform)
+    if path_str.contains(".cargo") {
+        return Some("cargo".to_string());
+    }
+
+    // Unix package managers
+    #[cfg(not(windows))]
+    {
+        if path_str.contains("homebrew") || path_str.contains("linuxbrew") {
+            return Some("brew".to_string());
+        }
+        if path_str.contains("mise") {
+            return Some("mise".to_string());
+        }
+    }
+
+    // Windows package managers
+    #[cfg(windows)]
+    {
+        if path_str.contains("scoop") {
+            return Some("scoop".to_string());
+        }
+        if path_str.contains("chocolatey") {
+            return Some("chocolatey".to_string());
+        }
+    }
+
+    None
 }
 
 /// Detect all known agents in parallel.
@@ -178,8 +213,9 @@ mod tests {
         assert!(!all.is_empty());
     }
 
+    // Cross-platform npm tests (patterns that work on both platforms)
     #[test]
-    fn test_detect_install_method_npm() {
+    fn test_detect_install_method_npm_cross_platform() {
         let path = std::path::PathBuf::from("/home/user/.npm-global/bin/opencode");
         assert_eq!(detect_install_method(&path), Some("npm".to_string()));
 
@@ -187,13 +223,16 @@ mod tests {
         assert_eq!(detect_install_method(&path), Some("npm".to_string()));
     }
 
+    // Cross-platform cargo test
     #[test]
     fn test_detect_install_method_cargo() {
         let path = std::path::PathBuf::from("/home/user/.cargo/bin/tool");
         assert_eq!(detect_install_method(&path), Some("cargo".to_string()));
     }
 
+    // Unix-only tests (brew, mise)
     #[test]
+    #[cfg(not(windows))]
     fn test_detect_install_method_brew() {
         let path = std::path::PathBuf::from("/home/linuxbrew/.linuxbrew/bin/tool");
         assert_eq!(detect_install_method(&path), Some("brew".to_string()));
@@ -203,6 +242,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn test_detect_install_method_mise() {
         let path =
             std::path::PathBuf::from("/home/user/.local/share/mise/installs/tool/bin/binary");
@@ -213,6 +253,52 @@ mod tests {
     fn test_detect_install_method_unknown() {
         let path = std::path::PathBuf::from("/usr/bin/tool");
         assert_eq!(detect_install_method(&path), None);
+    }
+
+    // Windows-specific tests
+    #[test]
+    #[cfg(windows)]
+    fn test_detect_install_method_npm_appdata() {
+        // Test npm detection from AppData\Roaming\npm
+        let path =
+            std::path::PathBuf::from(r"C:\Users\User\AppData\Roaming\npm\claude.cmd");
+        assert_eq!(detect_install_method(&path), Some("npm".to_string()));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_detect_install_method_npm_appdata_case_insensitive() {
+        // Test case-insensitivity (AppData vs appdata)
+        let path =
+            std::path::PathBuf::from(r"C:\Users\User\APPDATA\Roaming\NPM\tool.cmd");
+        assert_eq!(detect_install_method(&path), Some("npm".to_string()));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_detect_install_method_scoop() {
+        // Test scoop detection
+        let path =
+            std::path::PathBuf::from(r"C:\Users\User\scoop\shims\tool.exe");
+        assert_eq!(detect_install_method(&path), Some("scoop".to_string()));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_detect_install_method_chocolatey() {
+        // Test chocolatey detection
+        let path =
+            std::path::PathBuf::from(r"C:\ProgramData\chocolatey\bin\tool.exe");
+        assert_eq!(detect_install_method(&path), Some("chocolatey".to_string()));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_detect_install_method_cargo_windows() {
+        // Test cargo on Windows (cross-platform pattern)
+        let path =
+            std::path::PathBuf::from(r"C:\Users\User\.cargo\bin\tool.exe");
+        assert_eq!(detect_install_method(&path), Some("cargo".to_string()));
     }
 }
 
