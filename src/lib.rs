@@ -38,6 +38,7 @@ mod agent_kind;
 mod agent_status;
 mod detect;
 mod detection;
+mod options;
 
 pub use agent_kind::AgentKind;
 pub use agent_status::{AgentStatus, DetectionError, InstalledMetadata};

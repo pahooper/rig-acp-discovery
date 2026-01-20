@@ -1,6 +1,7 @@
 //! Agent detection functions.
 
 use crate::detection::{check_version, find_executable, parse_version};
+use crate::options::DetectOptions;
 use crate::{AgentKind, AgentStatus, DetectionError, InstalledMetadata};
 use futures::future::join_all;
 use std::collections::HashMap;
@@ -52,8 +53,9 @@ pub async fn detect(kind: AgentKind) -> AgentStatus {
         None => return AgentStatus::NotInstalled,
     };
 
-    // Step 2: Check version with 2s timeout
-    let version_output = match check_version(&path).await {
+    // Step 2: Check version with default timeout
+    let opts = DetectOptions::default();
+    let version_output = match check_version(&path, opts.timeout).await {
         Ok(output) => output,
         Err(DetectionError::Timeout) => return AgentStatus::NotInstalled,
         Err(e) => {
