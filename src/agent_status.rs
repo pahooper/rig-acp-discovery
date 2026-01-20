@@ -8,13 +8,32 @@ use std::time::SystemTime;
 ///
 /// This struct contains detailed information about a successfully detected
 /// and installed agent, including its location, version, and capabilities.
+///
+/// # Version Fields
+///
+/// The version information is stored in two fields:
+/// - `version`: The parsed semantic version (if parsing succeeded)
+/// - `raw_version`: The raw version string extracted from CLI output
+///
+/// Both fields are `Option` to support graceful degradation when version
+/// parsing fails. An agent can be usable even without a parsed version.
 #[derive(Debug, Clone)]
 pub struct InstalledMetadata {
     /// Path to the executable.
     pub path: PathBuf,
 
     /// Parsed semantic version of the agent.
-    pub version: Version,
+    ///
+    /// This is `None` if version parsing failed or was skipped.
+    /// The agent is still usable even without a parsed version.
+    pub version: Option<Version>,
+
+    /// Raw version string from CLI output (e.g., "v2.1.12", "1.2.3").
+    ///
+    /// This preserves the original version string including any prefix
+    /// (like "v"). It's available even when `version` is `None` due to
+    /// parse failure, unless version detection was skipped entirely.
+    pub raw_version: Option<String>,
 
     /// How the agent was installed (e.g., "npm", "cargo", "manual").
     ///
@@ -199,8 +218,9 @@ impl AgentStatus {
 
     /// Get the version of the agent if available.
     ///
-    /// Returns `Some(&Version)` for `Installed` and `VersionMismatch` variants,
-    /// `None` for `NotInstalled` and `Unknown`.
+    /// Returns `Some(&Version)` for `Installed` (if version was parsed) and
+    /// `VersionMismatch` variants. Returns `None` for `NotInstalled`, `Unknown`,
+    /// or when version parsing failed for an installed agent.
     ///
     /// # Example
     ///
@@ -212,7 +232,7 @@ impl AgentStatus {
     /// ```
     pub fn version(&self) -> Option<&Version> {
         match self {
-            Self::Installed(meta) => Some(&meta.version),
+            Self::Installed(meta) => meta.version.as_ref(),
             Self::VersionMismatch { found, .. } => Some(found),
             _ => None,
         }
@@ -226,10 +246,22 @@ mod tests {
     fn make_installed_metadata() -> InstalledMetadata {
         InstalledMetadata {
             path: PathBuf::from("/usr/bin/claude"),
-            version: Version::parse("1.2.3").unwrap(),
+            version: Some(Version::parse("1.2.3").unwrap()),
+            raw_version: Some("v1.2.3".to_string()),
             install_method: Some("npm".to_string()),
             last_verified: SystemTime::now(),
             reasoning_level: Some("high".to_string()),
+        }
+    }
+
+    fn make_installed_metadata_no_version() -> InstalledMetadata {
+        InstalledMetadata {
+            path: PathBuf::from("/usr/bin/claude"),
+            version: None,
+            raw_version: Some("unknown-version-format".to_string()),
+            install_method: Some("npm".to_string()),
+            last_verified: SystemTime::now(),
+            reasoning_level: None,
         }
     }
 
@@ -311,7 +343,21 @@ mod tests {
 
         assert_eq!(meta.path, cloned.path);
         assert_eq!(meta.version, cloned.version);
+        assert_eq!(meta.raw_version, cloned.raw_version);
         assert_eq!(meta.install_method, cloned.install_method);
         assert_eq!(meta.reasoning_level, cloned.reasoning_level);
+    }
+
+    #[test]
+    fn test_installed_status_with_no_version() {
+        let meta = make_installed_metadata_no_version();
+        let status = AgentStatus::Installed(meta);
+
+        // Should still be usable and installed even without version
+        assert!(status.is_usable());
+        assert!(status.is_installed());
+        assert_eq!(status.path(), Some(Path::new("/usr/bin/claude")));
+        // version() returns None when version is None
+        assert!(status.version().is_none());
     }
 }
