@@ -24,6 +24,7 @@
 //! println!("  {}", info.verification.command);
 //! ```
 
+pub(crate) mod info;
 mod types;
 
 pub use types::{

@@ -3,6 +3,11 @@
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 
+use crate::install::info::{
+    claude_code_install_info, codex_install_info, gemini_install_info, opencode_install_info,
+};
+use crate::InstallInfo;
+
 /// The type of AI coding agent.
 ///
 /// This enum identifies the supported AI coding agents that can be detected
@@ -109,6 +114,30 @@ impl AgentKind {
     /// ```
     pub fn all() -> impl Iterator<Item = Self> {
         <Self as IntoEnumIterator>::iter()
+    }
+
+    /// Get installation information for this agent.
+    ///
+    /// Returns platform-appropriate installation instructions including
+    /// the primary install command, alternatives, prerequisites, and
+    /// verification steps.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use rig_acp_discovery::AgentKind;
+    ///
+    /// let info = AgentKind::ClaudeCode.install_info();
+    /// println!("Install with: {}", info.primary.raw_command);
+    /// println!("Verify with: {}", info.verification.command);
+    /// ```
+    pub fn install_info(&self) -> InstallInfo {
+        match self {
+            Self::ClaudeCode => claude_code_install_info(),
+            Self::Codex => codex_install_info(),
+            Self::OpenCode => opencode_install_info(),
+            Self::Gemini => gemini_install_info(),
+        }
     }
 }
 
