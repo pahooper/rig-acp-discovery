@@ -11,6 +11,7 @@ use futures::future::join_all;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::SystemTime;
+use tracing::warn;
 
 /// Detect a single agent by kind using default options.
 ///
@@ -83,6 +84,7 @@ pub async fn detect(kind: AgentKind) -> AgentStatus {
 /// async fn main() {
 ///     let options = DetectOptions {
 ///         timeout: Duration::from_secs(10), // Longer timeout
+///         ..Default::default()
 ///     };
 ///     let status = detect_with_options(AgentKind::ClaudeCode, options).await;
 ///     if status.is_usable() {
@@ -97,7 +99,19 @@ pub async fn detect_with_options(kind: AgentKind, options: DetectOptions) -> Age
         None => return AgentStatus::NotInstalled,
     };
 
-    // Step 2: Check version with configured timeout
+    // Step 2: If skip_version is true, return Installed immediately without version info
+    if options.skip_version {
+        return AgentStatus::Installed(InstalledMetadata {
+            path: path.clone(),
+            version: None,
+            raw_version: None,
+            install_method: detect_install_method(&path),
+            last_verified: SystemTime::now(),
+            reasoning_level: None,
+        });
+    }
+
+    // Step 3: Check version with configured timeout
     let version_output = match check_version(&path, options.timeout).await {
         Ok(output) => output,
         Err(DetectionError::Timeout) => return AgentStatus::NotInstalled,
@@ -113,21 +127,25 @@ pub async fn detect_with_options(kind: AgentKind, options: DetectOptions) -> Age
         }
     };
 
-    // Step 3: Parse version from output
-    let version = match parse_version(&version_output) {
-        Ok(v) => v,
-        Err(e) => {
-            return AgentStatus::Unknown {
-                error: e,
-                message: format!("Failed to parse version from: {}", version_output.trim()),
-            }
+    // Step 4: Parse version from output with graceful degradation
+    let (version, raw_version) = match parse_version(&version_output) {
+        Some((v, raw)) => (Some(v), Some(raw)),
+        None => {
+            // Graceful degradation: log warning but still return Installed
+            warn!(
+                "Failed to parse version from '{}' for {}",
+                version_output.trim(),
+                kind.display_name()
+            );
+            (None, Some(version_output.trim().to_string()))
         }
     };
 
-    // Step 4: Build metadata and return Installed
+    // Step 5: Build metadata and return Installed
     AgentStatus::Installed(InstalledMetadata {
         path: path.clone(),
         version,
+        raw_version,
         install_method: detect_install_method(&path),
         last_verified: SystemTime::now(),
         reasoning_level: None,
@@ -241,6 +259,7 @@ pub async fn detect_all() -> HashMap<AgentKind, Result<AgentStatus, DetectionErr
 /// async fn main() {
 ///     let options = DetectOptions {
 ///         timeout: Duration::from_secs(10),
+///         ..Default::default()
 ///     };
 ///     let all = detect_all_with_options(options).await;
 ///
@@ -353,6 +372,7 @@ mod tests {
         // Test that custom options are accepted
         let options = DetectOptions {
             timeout: Duration::from_millis(100),
+            ..Default::default()
         };
         // Even with a very short timeout, detection should complete
         // (either success or timeout/not found)
@@ -371,6 +391,7 @@ mod tests {
     async fn test_detect_all_with_options() {
         let options = DetectOptions {
             timeout: Duration::from_secs(1),
+            ..Default::default()
         };
         let all = detect_all_with_options(options).await;
 
@@ -550,32 +571,50 @@ mod mock_tests {
 
     #[test]
     fn test_version_parsing_claude_format() {
-        let version = parse_version("2.1.12 (Claude Code)").unwrap();
+        let (version, raw) = parse_version("2.1.12 (Claude Code)").unwrap();
         assert_eq!(version.to_string(), "2.1.12");
+        assert_eq!(raw, "2.1.12");
     }
 
     #[test]
     fn test_version_parsing_codex_format() {
-        let version = parse_version("codex-cli 0.87.0").unwrap();
+        let (version, raw) = parse_version("codex-cli 0.87.0").unwrap();
         assert_eq!(version.to_string(), "0.87.0");
+        assert_eq!(raw, "0.87.0");
     }
 
     #[test]
     fn test_version_parsing_opencode_format() {
-        let version = parse_version("1.1.25").unwrap();
+        let (version, raw) = parse_version("1.1.25").unwrap();
         assert_eq!(version.to_string(), "1.1.25");
+        assert_eq!(raw, "1.1.25");
     }
 
     #[test]
     fn test_version_parsing_gemini_format() {
-        let version = parse_version("gemini 0.1.5").unwrap();
+        let (version, raw) = parse_version("gemini 0.1.5").unwrap();
         assert_eq!(version.to_string(), "0.1.5");
+        assert_eq!(raw, "0.1.5");
     }
 
     #[test]
     fn test_version_parsing_invalid() {
         let result = parse_version("no version here");
-        assert!(matches!(result, Err(DetectionError::VersionParseFailed)));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_version_parsing_v_prefix() {
+        let (version, raw) = parse_version("v1.2.3").unwrap();
+        assert_eq!(version.to_string(), "1.2.3");
+        assert_eq!(raw, "v1.2.3");
+    }
+
+    #[test]
+    fn test_version_parsing_two_part() {
+        let (version, raw) = parse_version("version 1.2").unwrap();
+        assert_eq!(version.to_string(), "1.2.0");
+        assert_eq!(raw, "1.2");
     }
 
     // Async tests for check_version with real system executables
@@ -584,5 +623,28 @@ mod mock_tests {
         let exec_path = std::path::PathBuf::from("/nonexistent/path/to/agent");
         let result = check_version(&exec_path, Duration::from_secs(2)).await;
         assert!(matches!(result, Err(DetectionError::IoError)));
+    }
+
+    #[tokio::test]
+    async fn test_detect_with_skip_version() {
+        // Test that skip_version returns Installed with None version
+        let options = DetectOptions {
+            skip_version: true,
+            ..Default::default()
+        };
+        let status = detect_with_options(AgentKind::ClaudeCode, options).await;
+
+        // If Claude Code is installed, it should return Installed with version: None
+        // If not installed, it should return NotInstalled
+        match status {
+            AgentStatus::Installed(meta) => {
+                assert!(meta.version.is_none(), "skip_version should result in version: None");
+                assert!(meta.raw_version.is_none(), "skip_version should result in raw_version: None");
+            }
+            AgentStatus::NotInstalled => {
+                // Expected if agent not installed
+            }
+            _ => panic!("Unexpected status with skip_version: {:?}", status),
+        }
     }
 }

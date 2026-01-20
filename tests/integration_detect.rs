@@ -3,7 +3,7 @@
 //! These tests check detection against real CLIs if they are installed.
 //! Tests are designed to pass regardless of which agents are installed.
 
-use rig_acp_discovery::{detect, detect_all, AgentKind, AgentStatus};
+use rig_acp_discovery::{detect, detect_all, AgentKind, AgentStatus, DetectOptions};
 
 #[tokio::test]
 async fn test_detect_all_returns_valid_statuses() {
@@ -15,22 +15,28 @@ async fn test_detect_all_returns_valid_statuses() {
     for (kind, result) in &results {
         match result {
             Ok(AgentStatus::Installed(meta)) => {
-                // If installed, path should exist and version should be valid
+                // If installed, path should exist
                 assert!(
                     meta.path.exists(),
                     "{} path should exist: {:?}",
                     kind.display_name(),
                     meta.path
                 );
+                // Should have version or raw_version (graceful degradation)
                 assert!(
-                    !meta.version.to_string().is_empty(),
-                    "{} should have version",
+                    meta.version.is_some() || meta.raw_version.is_some(),
+                    "{} should have version or raw_version",
                     kind.display_name()
                 );
+                // Print version info
+                let version_display = match &meta.version {
+                    Some(v) => v.to_string(),
+                    None => meta.raw_version.clone().unwrap_or_else(|| "unknown".to_string()),
+                };
                 println!(
                     "{}: {} at {:?} (method: {:?})",
                     kind.display_name(),
-                    meta.version,
+                    version_display,
                     meta.path,
                     meta.install_method
                 );
@@ -91,6 +97,7 @@ async fn test_detection_is_deterministic() {
         (AgentStatus::Installed(m1), AgentStatus::Installed(m2)) => {
             assert_eq!(m1.path, m2.path);
             assert_eq!(m1.version, m2.version);
+            assert_eq!(m1.raw_version, m2.raw_version);
         }
         (AgentStatus::NotInstalled, AgentStatus::NotInstalled) => {}
         (AgentStatus::Unknown { error: e1, .. }, AgentStatus::Unknown { error: e2, .. }) => {
@@ -144,12 +151,13 @@ async fn test_installed_metadata_has_valid_timestamps() {
 
 #[tokio::test]
 async fn test_detect_all_with_options_custom_timeout() {
-    use rig_acp_discovery::{detect_all_with_options, DetectOptions};
+    use rig_acp_discovery::detect_all_with_options;
     use std::time::Duration;
 
     // Use a short timeout
     let options = DetectOptions {
         timeout: Duration::from_secs(1),
+        ..Default::default()
     };
     let results = detect_all_with_options(options).await;
 
@@ -164,12 +172,13 @@ async fn test_detect_all_with_options_custom_timeout() {
 
 #[tokio::test]
 async fn test_detect_with_options_custom_timeout() {
-    use rig_acp_discovery::{detect_with_options, DetectOptions};
+    use rig_acp_discovery::detect_with_options;
     use std::time::Duration;
 
     // Use a short timeout
     let options = DetectOptions {
         timeout: Duration::from_millis(500),
+        ..Default::default()
     };
     let status = detect_with_options(AgentKind::ClaudeCode, options).await;
 
@@ -181,4 +190,37 @@ async fn test_detect_with_options_custom_timeout() {
             | AgentStatus::VersionMismatch { .. }
             | AgentStatus::Unknown { .. }
     ));
+}
+
+#[tokio::test]
+async fn test_detect_with_skip_version() {
+    use rig_acp_discovery::detect_with_options;
+
+    // Use skip_version option for fast-path detection
+    let options = DetectOptions {
+        skip_version: true,
+        ..Default::default()
+    };
+    let status = detect_with_options(AgentKind::ClaudeCode, options).await;
+
+    match status {
+        AgentStatus::Installed(meta) => {
+            // skip_version should result in version: None and raw_version: None
+            assert!(
+                meta.version.is_none(),
+                "skip_version should result in version: None"
+            );
+            assert!(
+                meta.raw_version.is_none(),
+                "skip_version should result in raw_version: None"
+            );
+            // Path should still exist
+            assert!(meta.path.exists(), "path should still exist");
+            println!("Claude Code found at {:?} (version skipped)", meta.path);
+        }
+        AgentStatus::NotInstalled => {
+            println!("Claude Code not installed");
+        }
+        _ => panic!("Unexpected status: {:?}", status),
+    }
 }
