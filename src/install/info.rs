@@ -230,3 +230,126 @@ pub(crate) fn gemini_install_info() -> InstallInfo {
         docs_url: "https://github.com/google-gemini/gemini-cli".to_string(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::AgentKind;
+
+    #[test]
+    fn test_claude_code_install_info() {
+        let info = claude_code_install_info();
+        assert!(info.is_supported);
+        assert!(!info.primary.raw_command.is_empty());
+        assert_eq!(info.verification.command, "claude --version");
+        // Native installer has no prerequisites
+        assert!(info.prerequisites.is_empty());
+        // Has npm as alternative
+        assert!(!info.alternatives.is_empty());
+    }
+
+    #[test]
+    fn test_codex_install_info() {
+        let info = codex_install_info();
+        assert!(info.is_supported);
+        assert!(info.primary.raw_command.contains("npm"));
+        // Node.js required
+        assert!(!info.prerequisites.is_empty());
+        assert!(info.prerequisites.iter().any(|p| p.name.contains("18")));
+        assert_eq!(info.verification.command, "codex --version");
+    }
+
+    #[test]
+    fn test_opencode_install_info() {
+        let info = opencode_install_info();
+        assert!(info.is_supported);
+        assert!(!info.primary.raw_command.is_empty());
+        assert_eq!(info.verification.command, "opencode --version");
+        // Has npm as alternative
+        assert!(!info.alternatives.is_empty());
+    }
+
+    #[test]
+    fn test_gemini_install_info() {
+        let info = gemini_install_info();
+        assert!(info.is_supported);
+        assert!(info.primary.raw_command.contains("npm"));
+        // Gemini requires Node.js 20+
+        assert!(info.prerequisites.iter().any(|p| p.name.contains("20")));
+        assert_eq!(info.verification.command, "gemini --version");
+    }
+
+    #[test]
+    fn test_agent_kind_install_info() {
+        // Verify method works on AgentKind
+        for kind in AgentKind::all() {
+            let info = kind.install_info();
+            assert!(!info.primary.raw_command.is_empty());
+            assert!(!info.verification.command.is_empty());
+            assert!(!info.docs_url.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_install_info_serializes() {
+        let info = claude_code_install_info();
+        let json = serde_json::to_string(&info).expect("Should serialize");
+        assert!(json.contains("primary"));
+        assert!(json.contains("verification"));
+    }
+
+    #[test]
+    fn test_all_agents_have_version_pattern() {
+        for kind in AgentKind::all() {
+            let info = kind.install_info();
+            assert_eq!(
+                info.verification.expected_pattern, VERSION_PATTERN,
+                "{:?} should use standard version pattern",
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn test_install_location_is_user_local() {
+        // All primary methods should install to user-local
+        for kind in AgentKind::all() {
+            let info = kind.install_info();
+            assert_eq!(
+                info.primary.location,
+                InstallLocation::UserLocal,
+                "{:?} primary should be user-local install",
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn test_structured_command_matches_raw() {
+        // The structured command should be consistent with raw_command
+        let info = codex_install_info();
+        assert_eq!(info.primary.command.program, "npm");
+        assert!(info.primary.command.args.contains(&"install".to_string()));
+        assert!(info.primary.command.args.contains(&"-g".to_string()));
+        assert!(info
+            .primary
+            .command
+            .args
+            .contains(&"@openai/codex".to_string()));
+    }
+
+    #[test]
+    fn test_prerequisites_have_check_commands() {
+        for kind in AgentKind::all() {
+            let info = kind.install_info();
+            for prereq in &info.prerequisites {
+                assert!(
+                    prereq.check_command.is_some(),
+                    "{:?} prerequisite '{}' should have check_command",
+                    kind,
+                    prereq.name
+                );
+            }
+        }
+    }
+}
