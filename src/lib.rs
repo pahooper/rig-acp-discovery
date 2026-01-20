@@ -58,6 +58,7 @@ pub use agent_kind::AgentKind;
 pub use agent_status::{AgentStatus, DetectionError, InstalledMetadata};
 pub use detect::{detect, detect_all, detect_all_with_options, detect_with_options};
 pub use install::{
-    InstallInfo, InstallLocation, InstallMethod, Prerequisite, StructuredCommand, VerificationStep,
+    can_install, InstallError, InstallInfo, InstallLocation, InstallMethod, InstallOptions,
+    InstallProgress, Prerequisite, StructuredCommand, VerificationStep,
 };
 pub use options::DetectOptions;

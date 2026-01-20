@@ -1,10 +1,29 @@
-//! Installation information for AI coding agents.
+//! Installation information and execution for AI coding agents.
 //!
-//! This module provides platform-appropriate installation instructions for
-//! agents that are not currently installed. Use `AgentKind::install_info()`
-//! to get installation details for any agent.
+//! This module provides:
+//! - Platform-appropriate installation instructions via `AgentKind::install_info()`
+//! - Pre-flight prerequisite checking via `can_install()`
+//! - Progress reporting types for installation UI
+//! - Error types with actionable fix suggestions
 //!
-//! # Example
+//! # Pre-flight Check Example
+//!
+//! ```rust,no_run
+//! use rig_acp_discovery::{AgentKind, can_install};
+//!
+//! #[tokio::main(flavor = "current_thread")]
+//! async fn main() {
+//!     match can_install(AgentKind::Codex).await {
+//!         Ok(()) => println!("Ready to install Codex"),
+//!         Err(e) => {
+//!             println!("Cannot install: {}", e);
+//!             println!("Fix: {}", e.fix_suggestion());
+//!         }
+//!     }
+//! }
+//! ```
+//!
+//! # Installation Info Example
 //!
 //! ```rust,no_run
 //! use rig_acp_discovery::AgentKind;
@@ -24,9 +43,15 @@
 //! println!("  {}", info.verification.command);
 //! ```
 
+mod errors;
 pub(crate) mod info;
+mod prereq;
+mod progress;
 mod types;
 
+pub use errors::InstallError;
+pub use prereq::can_install;
+pub use progress::{InstallOptions, InstallProgress};
 pub use types::{
     InstallInfo, InstallLocation, InstallMethod, Prerequisite, StructuredCommand, VerificationStep,
 };
