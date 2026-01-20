@@ -438,7 +438,7 @@ mod tests {
         );
 
         // If we have agents and detection actually takes time, check speedup
-        let agent_count = AgentKind::all().len();
+        let agent_count = AgentKind::all().count();
         if agent_count > 1 && sequential_duration.as_millis() > 100 {
             // Only check meaningful speedup if detection actually takes time
             let expected_max = sequential_duration.as_millis() as f64 * 0.9;

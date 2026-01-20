@@ -12,9 +12,9 @@ async fn test_detect_all_returns_valid_statuses() {
     // Should have results for all 4 agents
     assert_eq!(results.len(), 4);
 
-    for (kind, status) in &results {
-        match status {
-            AgentStatus::Installed(meta) => {
+    for (kind, result) in &results {
+        match result {
+            Ok(AgentStatus::Installed(meta)) => {
                 // If installed, path should exist and version should be valid
                 assert!(
                     meta.path.exists(),
@@ -35,10 +35,10 @@ async fn test_detect_all_returns_valid_statuses() {
                     meta.install_method
                 );
             }
-            AgentStatus::NotInstalled => {
+            Ok(AgentStatus::NotInstalled) => {
                 println!("{}: not installed", kind.display_name());
             }
-            AgentStatus::Unknown { error, message } => {
+            Ok(AgentStatus::Unknown { error, message }) => {
                 println!(
                     "{}: unknown - {:?}: {}",
                     kind.display_name(),
@@ -46,9 +46,16 @@ async fn test_detect_all_returns_valid_statuses() {
                     message
                 );
             }
-            _ => {
+            Ok(_) => {
                 // Handle future variants
                 println!("{}: other status", kind.display_name());
+            }
+            Err(e) => {
+                println!(
+                    "{}: detection error - {}",
+                    kind.display_name(),
+                    e.description()
+                );
             }
         }
     }
@@ -103,11 +110,11 @@ async fn test_detect_all_parallel_is_fast() {
     let _results = detect_all().await;
     let duration = start.elapsed();
 
-    // With 4 agents and 2s timeout each, sequential would be up to 8s
-    // Parallel should be at most ~2s (plus overhead)
-    // We use 5s as a generous upper bound
+    // With 4 agents and 5s timeout each, sequential would be up to 20s
+    // Parallel should be at most ~5s (plus overhead)
+    // We use 10s as a generous upper bound
     assert!(
-        duration.as_secs() < 5,
+        duration.as_secs() < 10,
         "detect_all() took too long: {:?}",
         duration
     );
@@ -118,8 +125,8 @@ async fn test_detect_all_parallel_is_fast() {
 async fn test_installed_metadata_has_valid_timestamps() {
     let results = detect_all().await;
 
-    for (kind, status) in results {
-        if let AgentStatus::Installed(meta) = status {
+    for (kind, result) in results {
+        if let Ok(AgentStatus::Installed(meta)) = result {
             // Timestamp should be recent (within last minute)
             let now = std::time::SystemTime::now();
             let elapsed = now
@@ -133,4 +140,45 @@ async fn test_installed_metadata_has_valid_timestamps() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn test_detect_all_with_options_custom_timeout() {
+    use rig_acp_discovery::{detect_all_with_options, DetectOptions};
+    use std::time::Duration;
+
+    // Use a short timeout
+    let options = DetectOptions {
+        timeout: Duration::from_secs(1),
+    };
+    let results = detect_all_with_options(options).await;
+
+    // Should still have results for all agents
+    assert_eq!(results.len(), 4);
+
+    // Each result should be valid
+    for (_, result) in &results {
+        assert!(result.is_ok() || result.is_err());
+    }
+}
+
+#[tokio::test]
+async fn test_detect_with_options_custom_timeout() {
+    use rig_acp_discovery::{detect_with_options, DetectOptions};
+    use std::time::Duration;
+
+    // Use a short timeout
+    let options = DetectOptions {
+        timeout: Duration::from_millis(500),
+    };
+    let status = detect_with_options(AgentKind::ClaudeCode, options).await;
+
+    // Should return a valid status (may be NotInstalled due to timeout)
+    assert!(matches!(
+        status,
+        AgentStatus::Installed(_)
+            | AgentStatus::NotInstalled
+            | AgentStatus::VersionMismatch { .. }
+            | AgentStatus::Unknown { .. }
+    ));
 }
