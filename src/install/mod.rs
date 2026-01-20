@@ -1,10 +1,17 @@
-//! Installation information and execution for AI coding agents.
+//! Installation execution for AI coding agents.
 //!
 //! This module provides:
-//! - Platform-appropriate installation instructions via `AgentKind::install_info()`
-//! - Pre-flight prerequisite checking via `can_install()`
-//! - Progress reporting types for installation UI
-//! - Error types with actionable fix suggestions
+//! - [`can_install`] - Pre-flight check for prerequisites
+//! - [`install`] - Programmatic installation with progress reporting
+//! - [`InstallError`] - Error types with actionable fix suggestions
+//! - [`InstallProgress`] - Progress stages for UI updates
+//! - [`InstallOptions`] - Configuration (timeout, etc.)
+//!
+//! # Consent Model
+//!
+//! Calling `install()` IS consent to install. The library does not prompt
+//! for confirmation. Your application's UI should confirm with the user
+//! before calling `install()`.
 //!
 //! # Pre-flight Check Example
 //!
@@ -20,6 +27,24 @@
 //!             println!("Fix: {}", e.fix_suggestion());
 //!         }
 //!     }
+//! }
+//! ```
+//!
+//! # Installation Example
+//!
+//! ```rust,no_run
+//! use rig_acp_discovery::{AgentKind, install, can_install, InstallOptions};
+//!
+//! async fn install_agent() {
+//!     // Check prerequisites first (optional but recommended for UI)
+//!     can_install(AgentKind::ClaudeCode).await.unwrap();
+//!
+//!     // Install with progress callback
+//!     install(
+//!         AgentKind::ClaudeCode,
+//!         InstallOptions::default(),
+//!         |p| println!("{:?}", p),
+//!     ).await.unwrap();
 //! }
 //! ```
 //!
@@ -44,12 +69,14 @@
 //! ```
 
 mod errors;
+mod executor;
 pub(crate) mod info;
 mod prereq;
 mod progress;
 mod types;
 
 pub use errors::InstallError;
+pub use executor::install;
 pub use prereq::can_install;
 pub use progress::{InstallOptions, InstallProgress};
 pub use types::{
