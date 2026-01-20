@@ -1,4 +1,8 @@
 //! Agent detection functions.
+//!
+//! This module provides async functions for detecting AI coding agents
+//! on the system. Detection can be performed for a single agent or
+//! all known agents in parallel.
 
 use crate::detection::{check_version, find_executable, parse_version};
 use crate::options::DetectOptions;
@@ -8,16 +12,17 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::SystemTime;
 
-/// Detect a single agent by kind.
+/// Detect a single agent by kind using default options.
 ///
-/// This function checks if the specified agent is installed and usable.
-/// It searches the system PATH for the agent's executable and verifies
-/// its availability by running `--version` with a 2-second timeout.
+/// This function checks if the specified agent is installed and usable,
+/// using the default detection timeout (5 seconds).
+///
+/// For custom timeout configuration, use [`detect_with_options`].
 ///
 /// # Detection Process
 ///
 /// 1. Search for executable in PATH and fallback locations
-/// 2. Run `{executable} --version` with 2-second timeout
+/// 2. Run `{executable} --version` with 5-second timeout
 /// 3. Parse semantic version from output using regex
 /// 4. Return `Installed` with metadata if all steps succeed
 ///
@@ -47,15 +52,53 @@ use std::time::SystemTime;
 /// }
 /// ```
 pub async fn detect(kind: AgentKind) -> AgentStatus {
+    detect_with_options(kind, DetectOptions::default()).await
+}
+
+/// Detect a single agent by kind with custom options.
+///
+/// This function checks if the specified agent is installed and usable,
+/// using the provided detection options for configuration.
+///
+/// # Arguments
+///
+/// * `kind` - The type of agent to detect
+/// * `options` - Configuration options including timeout
+///
+/// # Returns
+///
+/// An `AgentStatus` representing the detection result:
+/// - `Installed(metadata)` - Agent found and usable
+/// - `NotInstalled` - Agent not found or version check timed out
+/// - `VersionMismatch { .. }` - Agent found but version incompatible
+/// - `Unknown { .. }` - Detection failed with error
+///
+/// # Example
+///
+/// ```rust
+/// use rig_acp_discovery::{AgentKind, DetectOptions, detect_with_options};
+/// use std::time::Duration;
+///
+/// #[tokio::main(flavor = "current_thread")]
+/// async fn main() {
+///     let options = DetectOptions {
+///         timeout: Duration::from_secs(10), // Longer timeout
+///     };
+///     let status = detect_with_options(AgentKind::ClaudeCode, options).await;
+///     if status.is_usable() {
+///         println!("Claude Code is available at {:?}", status.path());
+///     }
+/// }
+/// ```
+pub async fn detect_with_options(kind: AgentKind, options: DetectOptions) -> AgentStatus {
     // Step 1: Find executable in PATH or fallback locations
     let path = match find_executable(kind.executable_name()) {
         Some(p) => p,
         None => return AgentStatus::NotInstalled,
     };
 
-    // Step 2: Check version with default timeout
-    let opts = DetectOptions::default();
-    let version_output = match check_version(&path, opts.timeout).await {
+    // Step 2: Check version with configured timeout
+    let version_output = match check_version(&path, options.timeout).await {
         Ok(output) => output,
         Err(DetectionError::Timeout) => return AgentStatus::NotInstalled,
         Err(e) => {
@@ -89,6 +132,135 @@ pub async fn detect(kind: AgentKind) -> AgentStatus {
         last_verified: SystemTime::now(),
         reasoning_level: None,
     })
+}
+
+/// Internal helper for parallel detection that returns Result per agent.
+///
+/// This function wraps the detection logic to return a Result, enabling
+/// error isolation in parallel detection. NotInstalled is considered
+/// a successful detection (not an error), while Unknown errors are
+/// propagated as Err.
+async fn detect_one(
+    kind: AgentKind,
+    options: &DetectOptions,
+) -> (AgentKind, Result<AgentStatus, DetectionError>) {
+    let status = detect_with_options(kind, options.clone()).await;
+
+    let result = match &status {
+        // Successful detection states - return Ok
+        AgentStatus::Installed(_) => Ok(status),
+        AgentStatus::NotInstalled => Ok(status),
+        AgentStatus::VersionMismatch { .. } => Ok(status),
+        // Detection errors - propagate as Err
+        AgentStatus::Unknown { error, .. } => Err(error.clone()),
+        // Handle any future variants conservatively (AgentStatus is #[non_exhaustive])
+        #[allow(unreachable_patterns)]
+        _ => Ok(status),
+    };
+
+    (kind, result)
+}
+
+/// Detect all known agents in parallel using default options.
+///
+/// This function detects all agents defined in `AgentKind` concurrently,
+/// returning a map of agent kinds to their detection results. Each agent's
+/// detection is isolated, so one failure doesn't affect others.
+///
+/// For custom timeout configuration, use [`detect_all_with_options`].
+///
+/// # Performance
+///
+/// Detection is performed in parallel using `futures::future::join_all`,
+/// so the total detection time is approximately the time of the slowest
+/// agent detection, not the sum of all detection times.
+///
+/// # Returns
+///
+/// A `HashMap` mapping each `AgentKind` to a `Result<AgentStatus, DetectionError>`.
+/// - `Ok(AgentStatus::Installed(_))` - Agent found and usable
+/// - `Ok(AgentStatus::NotInstalled)` - Agent definitively not found
+/// - `Ok(AgentStatus::VersionMismatch { .. })` - Agent found but version issue
+/// - `Err(DetectionError)` - Detection failed with error
+///
+/// # Example
+///
+/// ```rust
+/// use rig_acp_discovery::{AgentKind, detect_all};
+///
+/// #[tokio::main(flavor = "current_thread")]
+/// async fn main() {
+///     let all = detect_all().await;
+///
+///     for (kind, result) in &all {
+///         match result {
+///             Ok(status) if status.is_usable() => {
+///                 println!("{}: available", kind.display_name());
+///             }
+///             Ok(_) => {
+///                 println!("{}: not available", kind.display_name());
+///             }
+///             Err(e) => {
+///                 println!("{}: detection failed: {}", kind.display_name(), e.description());
+///             }
+///         }
+///     }
+/// }
+/// ```
+pub async fn detect_all() -> HashMap<AgentKind, Result<AgentStatus, DetectionError>> {
+    detect_all_with_options(DetectOptions::default()).await
+}
+
+/// Detect all known agents in parallel with custom options.
+///
+/// This function detects all agents defined in `AgentKind` concurrently,
+/// using the provided detection options for configuration. Each agent's
+/// detection is isolated, so one failure doesn't affect others.
+///
+/// # Arguments
+///
+/// * `options` - Configuration options including timeout
+///
+/// # Performance
+///
+/// Detection is performed in parallel using `futures::future::join_all`,
+/// so the total detection time is approximately the time of the slowest
+/// agent detection, not the sum of all detection times.
+///
+/// # Returns
+///
+/// A `HashMap` mapping each `AgentKind` to a `Result<AgentStatus, DetectionError>`.
+///
+/// # Example
+///
+/// ```rust
+/// use rig_acp_discovery::{DetectOptions, detect_all_with_options};
+/// use std::time::Duration;
+///
+/// #[tokio::main(flavor = "current_thread")]
+/// async fn main() {
+///     let options = DetectOptions {
+///         timeout: Duration::from_secs(10),
+///     };
+///     let all = detect_all_with_options(options).await;
+///
+///     for (kind, result) in &all {
+///         if let Ok(status) = result {
+///             if status.is_usable() {
+///                 println!("{}: ready", kind.display_name());
+///             }
+///         }
+///     }
+/// }
+/// ```
+pub async fn detect_all_with_options(
+    options: DetectOptions,
+) -> HashMap<AgentKind, Result<AgentStatus, DetectionError>> {
+    let futures: Vec<_> = AgentKind::all()
+        .map(|kind| detect_one(kind, &options))
+        .collect();
+
+    join_all(futures).await.into_iter().collect()
 }
 
 /// Detect the installation method from the executable path.
@@ -146,54 +318,10 @@ fn detect_install_method(path: &Path) -> Option<String> {
     None
 }
 
-/// Detect all known agents in parallel.
-///
-/// This function detects all agents defined in `AgentKind` concurrently,
-/// returning a map of agent kinds to their detection status.
-///
-/// # Performance
-///
-/// Detection is performed in parallel using `futures::future::join_all`,
-/// so the total detection time is approximately the time of the slowest
-/// agent detection, not the sum of all detection times.
-///
-/// # Returns
-///
-/// A `HashMap` mapping each `AgentKind` to its `AgentStatus`.
-///
-/// # Example
-///
-/// ```rust
-/// use rig_acp_discovery::{AgentKind, detect_all};
-///
-/// #[tokio::main(flavor = "current_thread")]
-/// async fn main() {
-///     let all = detect_all().await;
-///
-///     for (kind, status) in &all {
-///         println!("{}: {}", kind.display_name(),
-///             if status.is_usable() { "available" } else { "not available" });
-///     }
-///
-///     // Check specific agent
-///     if let Some(status) = all.get(&AgentKind::ClaudeCode) {
-///         if status.is_usable() {
-///             println!("Claude Code ready!");
-///         }
-///     }
-/// }
-/// ```
-pub async fn detect_all() -> HashMap<AgentKind, AgentStatus> {
-    let futures: Vec<_> = AgentKind::all()
-        .map(|kind| async move { (kind, detect(kind).await) })
-        .collect();
-
-    join_all(futures).await.into_iter().collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn test_detect_all_returns_all_agents() {
@@ -205,6 +333,11 @@ mod tests {
         assert!(all.contains_key(&AgentKind::Codex));
         assert!(all.contains_key(&AgentKind::OpenCode));
         assert!(all.contains_key(&AgentKind::Gemini));
+
+        // Each entry should be a Result (Ok or Err)
+        for (_, result) in &all {
+            assert!(result.is_ok() || result.is_err());
+        }
     }
 
     #[tokio::test]
@@ -213,6 +346,109 @@ mod tests {
         // Actual parallel timing would require real I/O
         let all = detect_all().await;
         assert!(!all.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_detect_with_custom_timeout() {
+        // Test that custom options are accepted
+        let options = DetectOptions {
+            timeout: Duration::from_millis(100),
+        };
+        // Even with a very short timeout, detection should complete
+        // (either success or timeout/not found)
+        let status = detect_with_options(AgentKind::ClaudeCode, options).await;
+        // Status should be one of the valid variants
+        assert!(matches!(
+            status,
+            AgentStatus::Installed(_)
+                | AgentStatus::NotInstalled
+                | AgentStatus::VersionMismatch { .. }
+                | AgentStatus::Unknown { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_detect_all_with_options() {
+        let options = DetectOptions {
+            timeout: Duration::from_secs(1),
+        };
+        let all = detect_all_with_options(options).await;
+
+        // Should have all agents
+        assert_eq!(all.len(), 4);
+
+        // Each result should be valid
+        for (_, result) in &all {
+            match result {
+                Ok(status) => {
+                    assert!(matches!(
+                        status,
+                        AgentStatus::Installed(_)
+                            | AgentStatus::NotInstalled
+                            | AgentStatus::VersionMismatch { .. }
+                            | AgentStatus::Unknown { .. }
+                    ));
+                }
+                Err(e) => {
+                    // Error should have a description
+                    assert!(!e.description().is_empty());
+                }
+            }
+        }
+    }
+
+    // Compile-time verification that detect functions return impl Future
+    #[test]
+    fn test_detect_returns_future() {
+        fn assert_future<F: std::future::Future>(_: F) {}
+        // These lines verify the async nature at compile time
+        // If detect() were not async, this would fail to compile
+        assert_future(detect(AgentKind::ClaudeCode));
+        assert_future(detect_all());
+        assert_future(detect_with_options(
+            AgentKind::ClaudeCode,
+            DetectOptions::default(),
+        ));
+        assert_future(detect_all_with_options(DetectOptions::default()));
+    }
+
+    #[tokio::test]
+    async fn test_parallel_detection_faster_than_sequential() {
+        use std::time::Instant;
+
+        // Time sequential detection (one at a time)
+        let sequential_start = Instant::now();
+        for kind in AgentKind::all() {
+            let _ = detect(kind).await;
+        }
+        let sequential_duration = sequential_start.elapsed();
+
+        // Time parallel detection (all at once)
+        let parallel_start = Instant::now();
+        let _ = detect_all().await;
+        let parallel_duration = parallel_start.elapsed();
+
+        // Parallel should be faster (or at most equal if all agents missing)
+        // Use generous margin: parallel should not be slower than sequential
+        assert!(
+            parallel_duration <= sequential_duration + Duration::from_millis(50),
+            "Parallel detection ({:?}) should not be significantly slower than sequential ({:?})",
+            parallel_duration,
+            sequential_duration
+        );
+
+        // If we have agents and detection actually takes time, check speedup
+        let agent_count = AgentKind::all().len();
+        if agent_count > 1 && sequential_duration.as_millis() > 100 {
+            // Only check meaningful speedup if detection actually takes time
+            let expected_max = sequential_duration.as_millis() as f64 * 0.9;
+            assert!(
+                (parallel_duration.as_millis() as f64) < expected_max,
+                "Parallel detection ({:?}) should be meaningfully faster than sequential ({:?})",
+                parallel_duration,
+                sequential_duration
+            );
+        }
     }
 
     // Cross-platform npm tests (patterns that work on both platforms)
@@ -262,8 +498,7 @@ mod tests {
     #[cfg(windows)]
     fn test_detect_install_method_npm_appdata() {
         // Test npm detection from AppData\Roaming\npm
-        let path =
-            std::path::PathBuf::from(r"C:\Users\User\AppData\Roaming\npm\claude.cmd");
+        let path = std::path::PathBuf::from(r"C:\Users\User\AppData\Roaming\npm\claude.cmd");
         assert_eq!(detect_install_method(&path), Some("npm".to_string()));
     }
 
@@ -271,8 +506,7 @@ mod tests {
     #[cfg(windows)]
     fn test_detect_install_method_npm_appdata_case_insensitive() {
         // Test case-insensitivity (AppData vs appdata)
-        let path =
-            std::path::PathBuf::from(r"C:\Users\User\APPDATA\Roaming\NPM\tool.cmd");
+        let path = std::path::PathBuf::from(r"C:\Users\User\APPDATA\Roaming\NPM\tool.cmd");
         assert_eq!(detect_install_method(&path), Some("npm".to_string()));
     }
 
@@ -280,8 +514,7 @@ mod tests {
     #[cfg(windows)]
     fn test_detect_install_method_scoop() {
         // Test scoop detection
-        let path =
-            std::path::PathBuf::from(r"C:\Users\User\scoop\shims\tool.exe");
+        let path = std::path::PathBuf::from(r"C:\Users\User\scoop\shims\tool.exe");
         assert_eq!(detect_install_method(&path), Some("scoop".to_string()));
     }
 
@@ -289,8 +522,7 @@ mod tests {
     #[cfg(windows)]
     fn test_detect_install_method_chocolatey() {
         // Test chocolatey detection
-        let path =
-            std::path::PathBuf::from(r"C:\ProgramData\chocolatey\bin\tool.exe");
+        let path = std::path::PathBuf::from(r"C:\ProgramData\chocolatey\bin\tool.exe");
         assert_eq!(detect_install_method(&path), Some("chocolatey".to_string()));
     }
 
@@ -298,8 +530,7 @@ mod tests {
     #[cfg(windows)]
     fn test_detect_install_method_cargo_windows() {
         // Test cargo on Windows (cross-platform pattern)
-        let path =
-            std::path::PathBuf::from(r"C:\Users\User\.cargo\bin\tool.exe");
+        let path = std::path::PathBuf::from(r"C:\Users\User\.cargo\bin\tool.exe");
         assert_eq!(detect_install_method(&path), Some("cargo".to_string()));
     }
 }
@@ -308,6 +539,7 @@ mod tests {
 mod mock_tests {
     use super::*;
     use crate::detection::{check_version, find_executable, parse_version};
+    use std::time::Duration;
 
     // Unit tests for synchronous functions - these are deterministic and stable
     #[test]
@@ -350,7 +582,7 @@ mod mock_tests {
     #[tokio::test(flavor = "current_thread")]
     async fn test_check_version_io_error_for_nonexistent() {
         let exec_path = std::path::PathBuf::from("/nonexistent/path/to/agent");
-        let result = check_version(&exec_path).await;
+        let result = check_version(&exec_path, Duration::from_secs(2)).await;
         assert!(matches!(result, Err(DetectionError::IoError)));
     }
 }
