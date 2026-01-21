@@ -1,6 +1,6 @@
 [package]
 name = "rig-acp-discovery"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.75"
 description = "Agent discovery for AI coding agents (Claude Code, Codex, OpenCode, Gemini)"
@@ -8,6 +8,7 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["rig", "ai", "agent", "discovery", "cli"]
 categories = ["development-tools"]
+publish = ["kellnr"]
 
 [dependencies]
 semver = "1.0"
