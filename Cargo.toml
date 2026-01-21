@@ -6,6 +6,7 @@ rust-version = "1.75"
 description = "Agent discovery for AI coding agents (Claude Code, Codex, OpenCode, Gemini)"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
+repository = "https://github.com/pahooper/rig-acp-discovery"
 keywords = ["rig", "ai", "agent", "discovery", "cli"]
 categories = ["development-tools"]
 publish = ["kellnr"]
